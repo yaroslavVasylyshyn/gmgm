@@ -224,7 +224,7 @@
         if (addressElement) {
             let addressText = addressElement.replace(', USA', '');
             let cleanAddress = addressText.replace(', United States', '');
-            let searchQuery = `"leasing ${cleanAddress}"`;
+            let searchQuery = `leasing ${cleanAddress}`;
             let searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
             await delay(300);
             window.open(searchUrl, '_blank');
