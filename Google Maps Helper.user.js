@@ -309,31 +309,38 @@
         return result;
     }
 
-    function convertTo24Hour(time12h, first = false) {
-        if (time12h.includes('–') || time12h.includes('-')) {
-            time12h = time12h.replace('–','-');
-            const [time1, time2] = time12h.split('-');
-            if (time1.includes('AM') || time1.includes('PM')) {
-                return `${convertTo24Hour(time1, true)}-${convertTo24Hour(time2)}`;
-            }
-            const [time, modifier] = time2.split(' ');
-            return `${convertTo24Hour(time1+" "+modifier, true)}-${convertTo24Hour(time2)}`;
-        } else {
-            let separate = ' ';
-            if (time12h.includes(' ')) separate = ' ';
-            const [time, modifier] = time12h.split(separate);
-            let [hours, minutes] = ['', ''];
-            if (time.includes(":")) [hours, minutes] = time.split(':');
-            else hours = time;
-            if (minutes === '') minutes = '00';
-            if (hours === '12' && modifier === "AM" && minutes === '00') hours = "24";
-            if (hours === '12' && modifier === "AM" && minutes !== '00') hours = "00";
-            if (hours.length === 1 && modifier === "AM") hours = '0' + hours;
-            if (modifier === 'PM' && hours !== '12') hours = parseInt(hours, 10) + 12;
-            if (hours === '24' && minutes === '00' && first) hours = '00';
-            return `${hours}:${minutes}`;
+function convertTo24Hour(time12h, first = false) {
+    // Handle time ranges (e.g., "10 am–8 pm")
+    if (time12h.includes('–') || time12h.includes('-')) {
+        time12h = time12h.replace('–', '-');
+        const [startTime, endTime] = time12h.split('-');
+        // Convert both parts of the range separately
+        const start24 = convertTo24Hour(startTime.trim(), true);
+        const end24 = convertTo24Hour(endTime.trim());
+        return `${start24}-${end24}`;
+    }
+    // Handle single time (e.g., "10 am" or "8 pm")
+    let [time, modifier] = time12h.split(' ');
+    if (!modifier) {
+        // Try splitting by space if ' ' didn't work
+        [time, modifier] = time12h.split(' ');
+    }
+    let [hours, minutes] = time.includes(':') ?
+        time.split(':') :
+        [time, '00'];
+    hours = hours.padStart(2, '0');
+    minutes = minutes || '00';
+    // Convert to 24-hour format
+    if (modifier) {
+        modifier = modifier.toUpperCase();
+        if (modifier === 'PM' && hours !== '12') {
+            hours = String(parseInt(hours, 10) + 12);
+        } else if (modifier === 'AM' && hours === '12') {
+            hours = '00';
         }
     }
+    return `${hours}:${minutes}`;
+}
 
     function copyOH(copy = true, dayContainer = document.querySelector('.eK4R0e')) {
         if (dayContainer) {
