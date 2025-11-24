@@ -1,18 +1,3 @@
-// ==UserScript==
-// @name         Google Maps Helper
-// @namespace    http://tampermonkey.net/
-// @version      1.43
-// @description  Add buttons to Google Maps to copy place information and search with a template
-// @author       Lehkyi Maksym
-// @match        https://*.google.com/maps/*
-// @match        https://*.google.com.ua/maps/*
-// @match        https://*.google.pl/maps/*
-// @match        https://*.yelp.com/*
-// @match        https://*.yelp.ca/*
-// @match        https://*.facebook.com/*
-// @grant        none
-// ==/UserScript==
-
 (function() {
     'use strict';
 
@@ -21,6 +6,12 @@
         if (!placeName) throw new Error('Place information not found');
 
         let info = placeName.cloneNode(true);
+
+        let buttonContainer = info.querySelector('.button-container');
+        if (buttonContainer) {
+            buttonContainer.remove();
+        }
+
         let buttons = info.querySelectorAll('button');
         buttons.forEach(button => button.remove());
 
@@ -51,47 +42,48 @@
         return name;
     }
 
-    function copyAddress(copy = true) {
+
+function copyAddress(copy = true) {
+    try {
         let addressElement = document.querySelector('div.Io6YTe.fontBodyMedium.kR99db');
-        try {
-            if (addressElement) {
-                if (!addressElement.innerText.includes('Confirm or fix this location')) {
-                    let info = `${addressElement.innerText}`;
-                    if (copy) {
-                        navigator.clipboard.writeText(info);
-                        showSnackBar();
-                    }
-                    return info;
-                } else {
-                    addressElement = document.querySelector('span.DkEaL');
-                    if (addressElement) {
-                        let info = `${addressElement.innerText}`;
-                        if (copy) {
-                            navigator.clipboard.writeText(info);
-                            showSnackBar();
-                        }
-                        return info;
-                    }
-                }
-            } else {
-                addressElement = document.querySelector('div.Y4SsEe');
-                if (addressElement && addressElement.ariaLabel.includes('Confirm or fix this location')) addressElement = document.querySelector('span.DkEaL');
-                if (addressElement) {
-                    let info = `${addressElement.ariaLabel.replace('Address, ','')}`;
-                    if (copy) {
-                        navigator.clipboard.writeText(info);
-                        showSnackBar();
-                    }
-                    return info;
-                } else {
-                    throw new Error('Address element not found');
-                    return "";
-                }
+        if (addressElement && !addressElement.innerText.includes('Confirm or fix this location')) {
+            let info = addressElement.innerText.trim();
+            if (copy) {
+                navigator.clipboard.writeText(info);
+                showSnackBar();
             }
-        } catch (error) {
-            console.log(error);
+            return info;
         }
+
+        addressElement = document.querySelector('span.DkEaL');
+        if (addressElement) {
+            let info = addressElement.innerText.trim();
+            if (copy) {
+                navigator.clipboard.writeText(info);
+                showSnackBar();
+            }
+            return info;
+        }
+
+        addressElement = document.querySelector('div.Y4SsEe');
+        if (addressElement) {
+            if (addressElement.ariaLabel && addressElement.ariaLabel.includes('Confirm or fix this location')) {
+                addressElement = document.querySelector('span.DkEaL');
+            }
+            if (addressElement && addressElement.ariaLabel) {
+                let info = addressElement.ariaLabel.replace('Address, ', '').trim();
+                if (copy) {
+                    navigator.clipboard.writeText(info);
+                    showSnackBar();
+                }
+                return info;
+            }
+        }
+    } catch (error) {
+        console.log(error);
     }
+    return "";
+}
 
     function copyBuildingAt(copy = true) {
         let addressElement = copyAddress(false);
@@ -219,34 +211,55 @@
         }
     }
 
-    async function searchLeasing() {
-        let addressElement = copyAddress(false);
-        if (addressElement) {
-            let addressText = addressElement.replace(', USA', '');
-            let cleanAddress = addressText.replace(', United States', '');
-            let searchQuery = `leasing ${cleanAddress}`;
-            let searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
-            await delay(300);
-            window.open(searchUrl, '_blank');
-        } else {
-            throw new Error('Address element not found');
-            alert('Address element not found.');
-        }
-    }
+    function regroupAndFormat(hoursByDay) {
+        const days = ['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su'];
 
-    async function searchGrandOpening() {
-        let addressElement = copyAddress(false);
-        if (addressElement) {
-            let addressText = addressElement.replace(', USA', '');
-            let cleanAddress = addressText.replace(', United States', '');
-            let searchQuery = `${copyName(false)} ${cleanAddress} grand opening`;
-            let searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
-            await delay(300);
-            window.open(searchUrl, '_blank');
-        } else {
-            throw new Error('Address element not found');
-            alert('Address element not found.');
+        const allDaysPresent = days.every(day => hoursByDay.hasOwnProperty(day));
+        if (allDaysPresent && days.every(day => hoursByDay[day] === "00:00-24:00")) {
+             return "mo-su 00:00-24:00";
         }
+
+        const allHours = Object.values(hoursByDay).filter(h => h);
+        let uniqueHours = [...new Set(allHours)];
+        let result = "";
+
+        for (let i = 0; i < uniqueHours.length; i++) {
+            let sameDays = [];
+
+            for (let j = 0; j < 7; j++) {
+                const currentDay = days[j];
+                if (hoursByDay.hasOwnProperty(currentDay) && hoursByDay[currentDay] === uniqueHours[i]) {
+                    sameDays.push(currentDay);
+                }
+            }
+
+            let groupedDays = [];
+            let startDay = sameDays[0];
+            let endDay = sameDays[0];
+
+            if (!startDay) continue;
+
+            for (let k = 1; k < sameDays.length; k++) {
+                const currentDayIndexInShortDays = days.indexOf(sameDays[k]);
+                const previousDayIndexInShortDays = days.indexOf(endDay);
+
+                if (currentDayIndexInShortDays === (previousDayIndexInShortDays + 1) % 7) {
+                    endDay = sameDays[k];
+                } else {
+                    groupedDays.push(startDay === endDay ? startDay : `${startDay}-${endDay}`);
+                    startDay = sameDays[k];
+                    endDay = sameDays[k];
+                }
+            }
+            if (startDay) {
+                groupedDays.push(startDay === endDay ? startDay : `${startDay}-${endDay}`);
+            }
+
+            result += `${groupedDays.join(",")}${uniqueHours[i] ? ' ' + uniqueHours[i] : ''}`;
+            if (i < uniqueHours.length - 1) result += "; ";
+        }
+
+        return result.trim();
     }
 
     function formatHours(hoursText) {
@@ -254,98 +267,107 @@
         let hoursLines = hoursText.trim().split('\n');
         let days = ['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su'];
         let sortedHoursByDay = {};
+
         hoursLines.forEach(line => {
-            let [day, hours] = line.split(': ');
+            let parts = line.split(': ');
+            if (parts.length < 2) return;
+
+            let day = parts[0];
+            let hoursRaw = parts.slice(1).join(': ');
+
             let shortDay = day.toLowerCase().substr(0, 2);
-            if (hours !== 'Closed') sortedHoursByDay[shortDay] = hours;
+
+            if (hoursRaw.includes('Closed')) return;
+
+            let hoursNormalized = hoursRaw
+                .replace(/\sto\s/gi, '-')
+                .replace(/,\s/g, ',');
+
+            let is12HourFormat = hoursNormalized.match(/(am|pm|дп|пп|a\.m\.|p\.m\.)/i);
+
+            let convertedHours;
+            if (is12HourFormat) {
+                let intervals = hoursNormalized.split(',');
+                convertedHours = intervals.map(interval => {
+                    let cleanedInterval = interval.trim().replace(/\s/g, '').replace('–', '-');
+                    return convertTo24Hour(cleanedInterval);
+                }).join(',');
+            } else {
+                convertedHours = hoursNormalized.replace(/(\d{1,2})[hH]/, '$1:00');
+                if (convertedHours === "Open 24 hours") {
+                    convertedHours = "00:00-24:00";
+                }
+            }
+
+            sortedHoursByDay[shortDay] = convertedHours;
         });
+
         let hoursByDay = {};
         days.forEach(day => {
             if (sortedHoursByDay.hasOwnProperty(day)) hoursByDay[day] = sortedHoursByDay[day];
         });
-        let tempSame = true;
-        days.forEach(day => {
-            if (hoursByDay[day] !== "Open 24 hours") tempSame = false;
-            else if (hoursByDay[day] === "Open 24 hours") hoursByDay[day] = "00:00 to 12:00 AM";
-        });
-        if (tempSame) return "mo-su 00:00-24:00";
-        let hoursIn24Format = {};
-        for (let day in hoursByDay) {
-            if (hoursByDay[day].includes(',')) {
-                let hourse = hoursByDay[day].replaceAll(', ',',').split(',');
-                hoursIn24Format[day] = '';
-                for (let k = 0; k < hourse.length; k++) {
-                    hoursIn24Format[day] += convertTo24Hour(hourse[k].replace(' to ', '-').replace(' - ','-'));
-                    if (k < hourse.length - 1) hoursIn24Format[day] += ',';
-                }
-            } else {
-                hoursIn24Format[day] = convertTo24Hour(hoursByDay[day].replace(' to ', '-').replace(' - ','-'));
-            }
-        }
-        for (let day in hoursByDay) hoursByDay[day] = hoursIn24Format[day];
-        let uniqueHours = [...new Set(Object.values(hoursByDay))];
-        let result = "";
-        for (let i = 0; i < uniqueHours.length; i++) {
-            let sameHours = [];
-            for (let j = 0; j < 7; j++) {
-                if (hoursIn24Format[days[j]] === uniqueHours[i]) sameHours.push(days[j]);
-            }
-            let groupedDays = [];
-            let startDay = sameHours[0];
-            let endDay = sameHours[0];
-            for (let k = 1; k < sameHours.length; k++) {
-                if (days.indexOf(sameHours[k]) === days.indexOf(endDay) + 1) {
-                    endDay = sameHours[k];
-                } else {
-                    groupedDays.push(startDay === endDay ? startDay : `${startDay}-${endDay}`);
-                    startDay = sameHours[k];
-                    endDay = sameHours[k];
-                }
-            }
-            groupedDays.push(startDay === endDay ? startDay : `${startDay}-${endDay}`);
-            result += `${groupedDays.join(",")} ${uniqueHours[i]}`;
-            if (i < uniqueHours.length - 1) result += "; ";
-        }
-        return result;
+
+        return regroupAndFormat(hoursByDay);
     }
 
-function convertTo24Hour(time12h, first = false) {
-    // Handle time ranges (e.g., "10 am–8 pm")
-    if (time12h.includes('–') || time12h.includes('-')) {
-        time12h = time12h.replace('–', '-');
-        const [startTime, endTime] = time12h.split('-');
-        // Convert both parts of the range separately
-        const start24 = convertTo24Hour(startTime.trim(), true);
-        const end24 = convertTo24Hour(endTime.trim());
-        return `${start24}-${end24}`;
-    }
-    // Handle single time (e.g., "10 am" or "8 pm")
-    let [time, modifier] = time12h.split(' ');
-    if (!modifier) {
-        // Try splitting by space if ' ' didn't work
-        [time, modifier] = time12h.split(' ');
-    }
-    let [hours, minutes] = time.includes(':') ?
-        time.split(':') :
-        [time, '00'];
-    hours = hours.padStart(2, '0');
-    minutes = minutes || '00';
-    // Convert to 24-hour format
-    if (modifier) {
-        modifier = modifier.toUpperCase();
-        if (modifier === 'PM' && hours !== '12') {
-            hours = String(parseInt(hours, 10) + 12);
-        } else if (modifier === 'AM' && hours === '12') {
-            hours = '00';
+    function convertTo24Hour(time12h) {
+        time12h = String(time12h).toUpperCase()
+            .replace(/\s/g, '')
+            .replace('–', '-');
+
+        if (!time12h.match(/(AM|PM|ДП|ПП|A\.M\.|P\.M\.)/i) && time12h.includes('-')) {
+            return time12h;
+        }
+
+        const convertSingleTime = (t) => {
+            let timePart = t.replace(/(AM|PM|ДП|ПП|A\.M\.|P\.M\.)/i, '');
+            let modifier = t.match(/(AM|PM|ДП|ПП|A\.M\.|P\.M\.)/i)?.[0] || '';
+
+            let [hours, minutes] = timePart.includes(":") ? timePart.split(':') : [timePart, '00'];
+
+            hours = parseInt(hours, 10);
+            minutes = minutes === '' ? '00' : minutes.padStart(2, '0');
+
+            if (modifier.match(/PM|ПП|P\.M\./i) && hours !== 12) {
+                hours += 12;
+            } else if (modifier.match(/AM|ДП|A\.M\./i) && hours === 12) {
+                hours = 0;
+            }
+
+            return `${String(hours).padStart(2, '0')}:${minutes}`;
+        };
+
+        if (time12h.includes('-')) {
+            const [time1, time2] = time12h.split('-');
+
+            let time2WithModifier = time2;
+            if (!time2.match(/(AM|PM|ДП|ПП|A\.M\.|P\.M\.)/i)) {
+                let modifier = time1.match(/(AM|PM|ДП|ПП|A\.M\.|P\.M\.)/i)?.[0];
+                if (modifier) {
+                    time2WithModifier += modifier;
+                }
+            }
+
+            let t1 = convertSingleTime(time1);
+            let t2 = convertSingleTime(time2WithModifier);
+
+            if (t2 === '00:00' && t1 !== '00:00' && (time2.includes('12') || time2WithModifier.includes('12'))) {
+                t2 = '24:00';
+            }
+
+            return `${t1}-${t2}`;
+        } else {
+            return convertSingleTime(time12h);
         }
     }
-    return `${hours}:${minutes}`;
-}
 
-    function copyOH(copy = true, dayContainer = document.querySelector('.eK4R0e')) {
+    function getHoursText(scopeElement) {
+        const root = scopeElement || document;
+
+        let dayContainer = root.querySelector('.eK4R0e');
         if (dayContainer) {
             let dayElements = dayContainer.querySelectorAll('tr.y0skZc');
-            if (dayElements) {
+            if (dayElements && dayElements.length > 0) {
                 let hoursInfo = [];
                 dayElements.forEach(day => {
                     let dayName = day.querySelector('td.ylH6lf div').innerText;
@@ -355,44 +377,169 @@ function convertTo24Hour(time12h, first = false) {
                         .join(',');
                     hoursInfo.push(`${dayName}: ${hours}`);
                 });
-                let hoursText = hoursInfo.join('\n');
-                let formatted = formatHours(hoursText);
-                if (formatted === "") {
-                    console.log('Opening hours elements not found');
-                    return;
-                }
-                if (copy) {
-                    navigator.clipboard.writeText(formatted);
-                    showSnackBar();
-                }
-                try {
-                    if (copy && document.querySelector('.rYsDIf').innerText === "Holiday hours") {
-                        alert('Careful, you have holiday hours, recheck by "suggest new hours"\n' + formatted);
-                    }
-                } catch (error) {}
-                return formatted;
-            } else {
-                throw new Error('Opening hours elements not found');
-                return "Expand hours to see time (maybe there is no time)";
+                return hoursInfo.join('\n');
             }
-        } else {
+        }
+
+        if (root === document) {
+            const hoursSections = root.querySelectorAll('div[data-md*="open hours"], div[aria-label]');
+            let foundHoursText = '';
+            const dayNamesRegex = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Понеділок|Вівторок|Середа|Четвер|П’ятниця|Субота|Неділя|Понедельник|Вторник|Среда|Четверг|Пятница|Суббота|Воскресенье)/i;
+
+            hoursSections.forEach(section => {
+                const potentialDayRows = section.querySelectorAll('div[aria-label], span[aria-label]');
+
+                potentialDayRows.forEach(element => {
+                    let ariaLabel = element.getAttribute('aria-label');
+                    if (ariaLabel && ariaLabel.match(dayNamesRegex)) {
+                        if (ariaLabel.includes(':')) {
+                            let [dayName, hours] = ariaLabel.split(':').map(s => s.trim());
+                            if (hours && hours.match(/(\d{1,2}:\d{2}|\d{1,2})/)) {
+                                foundHoursText += `${dayName}: ${hours}\n`;
+                            }
+                        }
+                    }
+                });
+            });
+
+            if (foundHoursText.trim() !== '') {
+                return foundHoursText.trim();
+            }
+
             let category = document.querySelector('.skqShb .fontBodyMedium');
             if (category && category.nextElementSibling) {
                 let next = category.nextElementSibling;
                 let text = next.innerText;
-                let mosu24 = 'mo-su 00:00-24:00';
-                if (text === 'Building' || text === 'Park' || text === 'Shopping mall') {
-                    if (copy) {
-                        navigator.clipboard.writeText(mosu24);
-                        showSnackBar();
-                    }
-                    return mosu24;
+                if (text === 'Building' || text === 'Park' || text === 'Shopping mall' || text === 'Житловий будинок') {
+                    return 'mo-su 00:00-24:00';
                 }
             }
-            throw new Error('Day container not found');
-            return "Expand hours to see time (maybe there is no time)";
         }
+
+        throw new Error('Opening hours not found or not expanded');
     }
+
+    function getFormattedHours(scopeElement) {
+        let hoursText;
+        try {
+            hoursText = getHoursText(scopeElement);
+        } catch (error) {
+            const root = scopeElement || document;
+            const holidayElement = root.querySelector('.rYsDIf');
+            if (holidayElement && holidayElement.innerText.includes("Holiday hours")) {
+                 throw new Error("Could not parse hours due to Holiday hours detected.");
+            }
+            throw error;
+        }
+
+        let formatted = formatHours(hoursText);
+        if (formatted === "") {
+            throw new Error("Opening hours elements not found");
+        }
+        return formatted;
+    }
+
+    function showHolidayWarningPopup(defaultHours) {
+        return new Promise((resolve, reject) => {
+            let existingPopup = document.getElementById('holidayWarningPopup');
+            if (existingPopup) existingPopup.remove();
+
+            const options = [
+                {
+                    text: 'Скопіювати регулярні години (якщо знайдені)',
+                    value: defaultHours,
+                    tooltip: `Буде скопійовано: ${defaultHours}`
+                }
+            ];
+
+
+            let popup = document.createElement('div');
+            popup.id = 'holidayWarningPopup';
+            popup.style.cssText = `
+                position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                background-color: #fff; border: 3px solid #f90; border-radius: 8px;
+                padding: 15px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                width: 300px; text-align: center;
+            `;
+
+            let title = document.createElement('h3');
+            title.innerText = '⚠️ Виявлено Святкові Години!';
+            title.style.cssText = 'color: #c00; margin-top: 0;';
+            popup.appendChild(title);
+
+            let warning = document.createElement('p');
+            warning.innerHTML = `Google показує **"Holiday hours"**. Регулярні години: <strong>${defaultHours}</strong>. Оберіть дію:`;
+            warning.style.cssText = 'margin-bottom: 15px; font-size: 14px;';
+            popup.appendChild(warning);
+
+            options.forEach(option => {
+                let button = document.createElement('button');
+                button.innerText = option.text;
+                button.title = option.tooltip;
+                button.className = 'popup-button';
+
+                let bgColor = '#ccf';
+
+                button.style.cssText = `
+                    display: block; width: 98%; margin: 5px auto; padding: 10px;
+                    background-color: ${bgColor};
+                    border: 1px solid #ccc; border-radius: 5px; cursor: pointer;
+                `;
+                button.onclick = () => {
+                    popup.remove();
+                    resolve(option.value);
+                };
+                popup.appendChild(button);
+            });
+
+            let cancelButton = document.createElement('button');
+            cancelButton.innerText = 'Скасувати Копіювання (Нічого не робити)';
+            cancelButton.style.cssText = 'margin-top: 15px; width: 98%; padding: 10px; background-color: #ddd; border: 1px solid #ccc; border-radius: 5px; cursor: pointer;';
+            cancelButton.onclick = () => {
+                popup.remove();
+                reject('User cancelled holiday warning.');
+            };
+            popup.appendChild(cancelButton);
+
+            document.body.appendChild(popup);
+        });
+    }
+
+
+    async function copyOH(copy = true, scopeElement = null) {
+        let formatted;
+        try {
+            formatted = getFormattedHours(scopeElement);
+        } catch (error) {
+            if (error.message.includes("Opening hours not found") && copy) {
+                alert("Opening hours not found or not expanded. Please expand hours to see time.");
+            }
+            if (error.message.includes("Holiday hours detected.") && copy) {
+                 formatted = 'N/A - Regular hours unknown';
+            } else {
+                 throw error;
+            }
+        }
+
+        let finalFormatted = formatted;
+
+        const holidayElement = (scopeElement || document).querySelector('.rYsDIf');
+        if (holidayElement && holidayElement.innerText.includes("Holiday hours") && copy) {
+            try {
+                finalFormatted = await showHolidayWarningPopup(formatted);
+            } catch (e) {
+                return formatted;
+            }
+        }
+
+        if (copy) {
+            navigator.clipboard.writeText(finalFormatted);
+            showSnackBar();
+        }
+
+        return finalFormatted;
+    }
+
 
     function copyYelpOH(copy = true) {
         let dayContainer = document.querySelector('.hours-table__09f24__KR8wh');
@@ -435,43 +582,32 @@ function convertTo24Hour(time12h, first = false) {
     }
 
     function copyYelpUpdateOH(copy = true) {
-        let dayContainer = document.querySelector('.day-hours');
-        if (dayContainer) {
-            let dayElements = dayContainer.querySelectorAll('.hours');
-            if (dayElements.length > 0) {
-                let hoursInfo = {};
-                dayElements.forEach(day => {
-                    let dayNameElement = day.querySelector('.weekday');
-                    let startElement = day.querySelector('.start');
-                    let endElement = day.querySelector('.end');
-                    if (dayNameElement && startElement && endElement) {
-                        let dayName = dayNameElement.innerText;
-                        let hours = `${startElement.innerText} to ${endElement.innerText}`;
-                        hours = hours.replaceAll('am', 'AM').replaceAll('pm', 'PM');
-                        if (hoursInfo[dayName]) hoursInfo[dayName].push(hours);
-                        else hoursInfo[dayName] = [hours];
-                    }
-                });
-                let hoursFormatted = [];
-                for (let day in hoursInfo) {
-                    let hoursForDay = hoursInfo[day].join(',');
-                    hoursFormatted.push(`${day}: ${hoursForDay}`);
+        let container = document.querySelector('.u-nowrap[for="attr_BusinessHours"]');
+        let dayHoursContainer = document.querySelector('.day-hours');
+        let existingButton = container && container.parentElement.querySelector('.custom-button');
+        if (container && dayHoursContainer && !existingButton) {
+            let copy_oh = 'Copy formatted opening hours';
+            try { copy_oh = 'Copy formatted opening hours\n' + copyYelpUpdateOH(false); } catch { console.log("cant find hours"); }
+            const data = { text: 'Opening Hours', handler: copyYelpUpdateOH, icon: 'https://toppng.com/uploads/preview/ink-pink-clock-clip-art-flexible-working-hours-ico-11563426366wt3lfgsvlc.png', tooltip: copy_oh };
+            let button = document.createElement('button');
+            button.type = 'button';
+            button.innerHTML = `<img src="${data.icon}" class="button-icon"> ${data.text}`;
+            button.className = 'custom-button';
+            button.title = data.tooltip || data.text;
+            button.onclick = async () => {
+                try {
+                    await data.handler();
+                    successStyle(button);
+                } catch (error) {
+                    console.error(error);
+                    errorStyle(button);
                 }
-                let hoursText = hoursFormatted.join('\n');
-                let formatted = formatHours(hoursText);
-                if (formatted === "" || !formatted) throw new Error('Opening hours elements not found');
-                if (copy) {
-                    navigator.clipboard.writeText(formatted);
-                    showSnackBar();
-                }
-                return formatted;
-            } else {
-                throw new Error('Opening hours elements not found');
-                return "(maybe there is no time)";
-            }
-        } else {
-            throw new Error('Day container not found');
-            return "(maybe there is no time)";
+            };
+            container.appendChild(button);
+        }
+
+        if (!copy) {
+            return "N/A - Yelp Update Hours";
         }
     }
 
@@ -487,7 +623,7 @@ function convertTo24Hour(time12h, first = false) {
     }
 
     function copyFBHours(copy = true) {
-        let dayContainer = document.querySelectorAll('.xyorhqc .x9f619 .x193iq5w');
+        let dayContainer = document.querySelectorAll('.xyorhqc .x9f619 .x78zum5.x5yr21d.x1pi30zi.x1swvt13.xl56j7k');
         let days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
         if (dayContainer.length > 0) {
             let hoursInfo = [];
@@ -527,27 +663,47 @@ function convertTo24Hour(time12h, first = false) {
         return addressik.replace(/\s(Floor|Suite|Ste|Apt|Unit|Bldg|Fl|Rm|#|No)\s+[A-Za-z0-9]+/gi, '');
     }
 
-    function copyJsonAddress(copy = true) {
-        let result = "";
-        try {
-            let info = copyAddress(false);
-            if (info.split(",").length < 4) info = ',' + info;
-            let addresArray = info.split(",");
-            let street = deleteSuite(addresArray[0].trim());
-            let city = addresArray[1].trim();
-            let stateAndPostal = addresArray[2].trim();
-            let state = stateAndPostal.replace(/[^a-zа-я]+/gi, "");
-            let postal = stateAndPostal.replace(/[^\d]+/g, "");
-            let cc = "US";
-            let country = "United States";
-            result = `{'cc': '${cc}',\n'city': '${city}',\n'country': '${country}',\n'formatted_address': '${street}, ${city}, ${state}, ${country}',\n'formatted_city': '${city}, ${state}, ${country}',\n'postal_code': '${postal}',\n'state': '${state}',\n'street_address': '${street}'}`;
-            if (copy) showSnackBar();
-        } catch {
-            throw new Error('Can\'t format to json');
+function copyJsonAddress(copy = true) {
+    let result = "";
+    try {
+        let info = copyAddress(false);
+
+        if (!info || typeof info !== 'string') {
+            throw new Error("Address info is empty or invalid");
         }
-        if (copy) navigator.clipboard.writeText(result);
-        return result;
+
+        if (info.split(",").length < 4) info = ',' + info;
+        let addresArray = info.split(",");
+        let street = deleteSuite(addresArray[0].trim());
+        let city = addresArray[1]?.trim() || "";
+        let stateAndPostal = addresArray[2]?.trim() || "";
+        let state = stateAndPostal.replace(/[^a-zа-я]+/gi, "");
+        let postal = stateAndPostal.replace(/[^\d]+/g, "");
+        let cc = "US";
+        let country = "United States";
+
+        const obj = {
+            cc: cc,
+            city: city,
+            country: country,
+            formatted_address: `${street}, ${city}, ${state}, ${country}`,
+            formatted_city: `${city}, ${state}, ${country}`,
+            postal_code: postal,
+            state: state,
+            street_address: street
+        };
+
+        result = JSON.stringify(obj, null, 2);
+
+        if (copy) showSnackBar();
+    } catch (e) {
+        console.error("Can't format to json:", e);
+        throw e;
     }
+    if (copy) navigator.clipboard.writeText(result);
+    return result;
+}
+
 
     function extractCoordinatesFromGoogleMapsUrl(url) {
         let regex = /@(-?\d+\.\d+),(-?\d+\.\d+),(\d+\.?\d*)z/;
@@ -577,90 +733,6 @@ function convertTo24Hour(time12h, first = false) {
         }
     }
 
-    function createOSMUrlFromCoordinates(latitude, longitude, zoom) {
-        return `https://openstreetmap.placer.team/#map=${zoom}/${latitude}/${longitude}`;
-    }
-
-    async function openStreetMap() {
-        let googleMapsUrl = window.location.href;
-        try {
-            let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
-            if (zoom <= 17.5) throw new Error('Zoom too small');
-            let veUrl = createOSMUrlFromCoordinates(latitude, longitude, zoom);
-            await delay(300);
-            window.open(veUrl, '_blank');
-        } catch (error) {
-            if (error.message !== 'Change from angle view to top view') {
-                if (confirm('Zoom is too high, are you sure? Zoom closer')) {
-                    let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
-                    let veUrl = createOSMUrlFromCoordinates(latitude, longitude, zoom);
-                    await delay(300);
-                    window.open(veUrl, '_blank');
-                    return;
-                } else {
-                    throw new Error('Zoom error');
-                }
-            }
-            throw new Error('Zoom error');
-        }
-    }
-
-    function createVEUrlFromCoordinates(latitude, longitude, zoom) {
-        return `https://venues-prod.placer.team/#background=Bing&disable_features=deleted_venues,sources_layer,boundaries&map=${zoom}/${latitude}/${longitude}`;
-    }
-
-    async function venueEditor() {
-        let googleMapsUrl = window.location.href;
-        try {
-            let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
-            if (zoom <= 17.5) throw new Error('Zoom too small');
-            let veUrl = createVEUrlFromCoordinates(latitude, longitude, zoom);
-            await delay(300);
-            window.open(veUrl, '_blank');
-        } catch (error) {
-            if (error.message !== 'Change from angle view to top view') {
-                if (confirm('Zoom is too high, are you sure? Zoom closer')) {
-                    let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
-                    let veUrl = createVEUrlFromCoordinates(latitude, longitude, zoom);
-                    await delay(300);
-                    window.open(veUrl, '_blank');
-                    return;
-                } else {
-                    throw new Error('Zoom error');
-                }
-            }
-            throw new Error('Zoom error');
-        }
-    }
-
-    function createGJUrlFromCoordinates(latitude, longitude, zoom) {
-        return `https://geojson.io/#map=${zoom}/${latitude}/${longitude}`;
-    }
-
-    async function openGeoJson() {
-        let googleMapsUrl = window.location.href;
-        try {
-            let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
-            if (zoom <= 17.5) throw new Error('Zoom too small');
-            let veUrl = createGJUrlFromCoordinates(latitude, longitude, zoom);
-            await delay(300);
-            window.open(veUrl, '_blank');
-        } catch (error) {
-            if (error.message !== 'Change from angle view to top view') {
-                if (confirm('Zoom is too high, are you sure? Zoom closer')) {
-                    let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
-                    let veUrl = createGJUrlFromCoordinates(latitude, longitude, zoom);
-                    await delay(300);
-                    window.open(veUrl, '_blank');
-                    return;
-                } else {
-                    throw new Error('Zoom error');
-                }
-            }
-            throw new Error('Zoom error');
-        }
-    }
-
     function createPlacerUrlFromCoordinates(latitude, longitude, zoom) {
         let adjustedZoom = Math.min(zoom, 17);
         let latDelta = 0.0005 * Math.pow(2, 18 - adjustedZoom);
@@ -674,18 +746,17 @@ function convertTo24Hour(time12h, first = false) {
         return `https://analytics.placer.ai/#!/admin/explore2/?params=%7B%22type%22:%22complexes%22,%22center%22:%7B%22lat%22:${latitude},%22lng%22:${longitude}%7D,%22ne%22:%22${neLat},${neLng}%22,%22sw%22:%22${swLat},${swLng}%22,%22zoom%22:${adjustedZoom}%7D`;
     }
 
-    function openPlacerMapUrl() {
-        let googleMapsUrl = window.location.href;
-        try {
-            let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
-            let placerUrl = createPlacerUrlFromCoordinates(latitude, longitude, zoom);
-            window.open(googleMapsUrl, '_blank');
-            window.location.href = placerUrl;
-        } catch (error) {
-            if (error.message !== 'Change from angle view to top view') alert('Zoom closer');
-            throw new Error('Zoom error');
-        }
+function openPlacerMapUrl() {
+    let googleMapsUrl = window.location.href;
+    try {
+        let { latitude, longitude, zoom } = extractCoordinatesFromGoogleMapsUrl(googleMapsUrl);
+        let placerUrl = createPlacerUrlFromCoordinates(latitude, longitude, zoom);
+        window.open(placerUrl, '_blank');
+    } catch (error) {
+        if (error.message !== 'Change from angle view to top view') alert('Zoom closer');
+        throw new Error('Zoom error');
     }
+}
 
     function addSnackBarToPage() {
         const snackBarHTML = `<span id="snackbar">Successfully Copied</span>`;
@@ -710,7 +781,6 @@ function convertTo24Hour(time12h, first = false) {
         button.style.backgroundColor = 'red';
     }
 
-    // Popup window for Building At options
     function showBuildingAtPopup() {
         let existingPopup = document.getElementById('buildingAtPopup');
         if (existingPopup) existingPopup.remove();
@@ -755,7 +825,15 @@ function convertTo24Hour(time12h, first = false) {
             button.style.border = '1px solid #ccc';
             button.style.borderRadius = '3px';
             button.style.cursor = 'pointer';
-            button.title = `Copy "${option.handler(false)}"`;
+
+            let tooltipText;
+            try {
+                tooltipText = `Copy "${option.handler(false)}"`;
+            } catch (e) {
+                tooltipText = "Address not found";
+            }
+            button.title = tooltipText;
+
             button.onclick = async () => {
                 try {
                     await option.handler();
@@ -784,24 +862,33 @@ function convertTo24Hour(time12h, first = false) {
         document.body.appendChild(popup);
     }
 
+
     async function addButtonToContainer() {
         let container = document.querySelector('.lMbq3e h1.DUwDvf.lfPIob');
         const sections = document.querySelectorAll('.OqCZI.fontBodyMedium');
+
         if (!container && sections.length != 0) {
-            sections.forEach(section => {
+             sections.forEach(section => {
                 const header = section.querySelector('.MkV9');
                 const hoursTable = section.querySelector('.eK4R0e');
                 if (header && hoursTable && header.querySelectorAll('button.custom-button').length === 0) {
                     const button = document.createElement('button');
                     button.className = 'custom-button';
-                    let title = 'Copy formatted opening hours\n' + copyOH(false, hoursTable);
+
+                    let title = 'Copy formatted opening hours';
+                    try {
+                        title = 'Copy formatted opening hours\n' + getFormattedHours(section);
+                    } catch (e) {
+                        console.log('cant find hours for section tooltip');
+                    }
+
                     button.title = title;
                     button.innerHTML = `<img src="https://toppng.com/uploads/preview/ink-pink-clock-clip-art-flexible-working-hours-ico-11563426366wt3lfgsvlc.png" class="button-icon"> Opening Hours`;
                     button.addEventListener('click', () => {
                         event.stopPropagation();
                         try {
                             successStyle(button);
-                            copyOH(true, hoursTable);
+                            copyOH(true, section);
                         } catch (error) {
                             errorStyle(button);
                             console.error(error);
@@ -811,21 +898,40 @@ function convertTo24Hour(time12h, first = false) {
                 }
             });
         }
+
         if (container && container.querySelector('.button-container') === null) {
             let copy_name = 'Copy name: "' + copyName(false) + '"';
             let copy_address = 'Copy address: "' + copyAddress(false) + '"';
+
             let copy_oh = 'Copy formatted opening hours, if u get error, expand Hours';
-            try { copy_oh = 'Copy formatted opening hours, if u get error, expand Hours\n' + copyOH(false) + '\nRight Mouse Click = mo-su 00:00-24:00'; } catch { console.log("cant find hours"); }
-            let grand_opening = 'Google search for Grand Opening: "' + copyName(false) + ' ' + copyAddress(false) + ' Grand Opening"';
-            let leasing = 'Google search for Leasing: "leasing ' + copyAddress(false) + '"';
+            try {
+                let hoursText = getFormattedHours();
+                copy_oh = 'Copy formatted opening hours, if u get error, expand Hours\n' + hoursText + '\nRight Mouse Click = mo-su 00:00-24:00';
+            } catch (e) {
+                console.log("Can't find hours for tooltip:", e.message);
+            }
+
+
+            let jsonAddressTooltip;
+            try {
+                jsonAddressTooltip = 'Copy address as JSON\n' + copyJsonAddress(false);
+            } catch (error) {
+                jsonAddressTooltip = 'Copy address as JSON\n (N/A - address not found)';
+            }
+
+            let buildingAtTooltip = 'Open a menu to copy different building types';
+
+            const additionalButtonsData = [
+                { text: 'Analytic', handler: openPlacerMapUrl, icon: 'https://analytics.placer.ai/favicon/favicon-32x32.png?v=2', tooltip: 'Open - analytics.placer.ai at the same coordinates' },
+                { text: 'Building At', handler: showBuildingAtPopup, icon: 'https://cdn-icons-png.flaticon.com/128/25/25694.png', tooltip: buildingAtTooltip },
+                { text: 'JsonAddress', handler: copyJsonAddress, icon: 'https://analytics.placer.team/admin/static/admin-favicon.png', tooltip: jsonAddressTooltip }
+            ];
+
             const buttonsData = [
                 { text: 'Name', handler: copyName, tooltip: copy_name },
                 { text: 'Address', handler: copyAddress, tooltip: copy_address },
                 { text: 'Opening Hours', handler: copyOH, tooltip: copy_oh },
-                { text: 'Grand Opening', handler: searchGrandOpening, icon: 'https://static.thenounproject.com/png/5113532-200.png', tooltip: grand_opening },
-                { text: 'Leasing', handler: searchLeasing, icon: 'https://cdn.icon-icons.com/icons2/2248/PNG/512/floor_plan_icon_135611.png', tooltip: leasing },
-                { text: 'Venue Editor', handler: venueEditor, icon: 'https://venues-prod.placer.team/img/favicon.ico', tooltip: 'Open Venue Editor at the same coordinates' },
-                { text: 'Complex', handler: showAdditionalButtons, icon: 'https://analytics.placer.team/admin/static/admin-favicon.png', tooltip: 'Show tools for Complex' }
+                ...additionalButtonsData
             ];
 
             let buttonContainer = document.createElement('div');
@@ -833,42 +939,16 @@ function convertTo24Hour(time12h, first = false) {
 
             let infoHeader = document.createElement('div');
             infoHeader.className = 'section-header';
-            infoHeader.innerText = '–––Copy Info–––';
+            infoHeader.innerText = '–––Copy Info & Tools–––';
             buttonContainer.appendChild(infoHeader);
 
-            let infoButtons = document.createElement('div');
-            infoButtons.className = 'button-row';
-            buttonsData.slice(0, 3).forEach(data => {
+            let buttonRow = document.createElement('div');
+            buttonRow.className = 'button-row';
+            buttonsData.forEach(data => {
                 let button = createButton(data);
-                infoButtons.appendChild(button);
+                buttonRow.appendChild(button);
             });
-            buttonContainer.appendChild(infoButtons);
-
-            let searchHeader = document.createElement('div');
-            searchHeader.className = 'section-header';
-            searchHeader.innerText = '–––Google Search–––';
-            buttonContainer.appendChild(searchHeader);
-
-            let searchButtons = document.createElement('div');
-            searchButtons.className = 'button-row';
-            buttonsData.slice(3, 5).forEach(data => {
-                let button = createButton(data);
-                searchButtons.appendChild(button);
-            });
-            buttonContainer.appendChild(searchButtons);
-
-            let editorsHeader = document.createElement('div');
-            editorsHeader.className = 'section-header';
-            editorsHeader.innerText = '–––Open Editors–––';
-            buttonContainer.appendChild(editorsHeader);
-
-            let editorButtons = document.createElement('div');
-            editorButtons.className = 'button-row';
-            buttonsData.slice(5).forEach(data => {
-                let button = createButton(data);
-                editorButtons.appendChild(button);
-            });
-            buttonContainer.appendChild(editorButtons);
+            buttonContainer.appendChild(buttonRow);
 
             container.appendChild(buttonContainer);
 
@@ -894,81 +974,47 @@ function convertTo24Hour(time12h, first = false) {
             let copy_oh = 'Copy formatted opening hours';
             try { copy_oh = 'Copy formatted opening hours\n' + copyYelpOH(false); } catch { console.log("cant find hours"); }
             const data = { text: 'Opening Hours', handler: copyYelpOH, icon: 'https://toppng.com/uploads/preview/ink-pink-clock-clip-art-flexible-working-hours-ico-11563426366wt3lfgsvlc.png', tooltip: copy_oh };
-            let button = document.createElement('button');
-            button.innerHTML = `<img src="${data.icon}" class="button-icon"> ${data.text}`;
-            button.className = 'custom-button';
-            button.title = data.tooltip || data.text;
-            button.onclick = async () => {
-                try {
-                    await data.handler();
-                    successStyle(button);
-                } catch (error) {
-                    console.error(error);
-                    errorStyle(button);
-                }
-            };
+            let button = createButton(data);
             container.appendChild(button);
         }
     }
 
-    function addYelpUpdateButton() {
+    function addYelpUpdateButtons() {
         let container = document.querySelector('.u-nowrap[for="attr_BusinessHours"]');
         let dayHoursContainer = document.querySelector('.day-hours');
         let existingButton = container && container.parentElement.querySelector('.custom-button');
         if (container && dayHoursContainer && !existingButton) {
             let copy_oh = 'Copy formatted opening hours';
-            try { copy_oh = 'Copy formatted opening hours\n' + copyYelpUpdateOH(false); } catch { console.log("cant find hours"); }
-            const data = { text: 'Opening Hours', handler: copyYelpUpdateOH, icon: 'https://toppng.com/uploads/preview/ink-pink-clock-clip-art-flexible-working-hours-ico-11563426366wt3lfgsvlc.png', tooltip: copy_oh };
-            let button = document.createElement('button');
-            button.type = 'button';
-            button.innerHTML = `<img src="${data.icon}" class="button-icon"> ${data.text}`;
-            button.className = 'custom-button';
-            button.title = data.tooltip || data.text;
-            button.onclick = async () => {
-                try {
-                    await data.handler();
-                    successStyle(button);
-                } catch (error) {
-                    console.error(error);
-                    errorStyle(button);
-                }
-            };
+            try { copy_oh = 'Copy formatted opening hours\n' + copyYelpOH(false); } catch { console.log("cant find hours"); }
+            const data = { text: 'Opening Hours', handler: copyYelpOH, icon: 'https://toppng.com/uploads/preview/ink-pink-clock-clip-art-flexible-working-hours-ico-11563426366wt3lfgsvlc.png', tooltip: copy_oh };
+            let button = createButton(data);
             container.appendChild(button);
         }
     }
 
-    function addFBB() {
-        let container = document.querySelector('div.x6s0dn4.x9f619.x78zum5.x5yr21d.x1pi30zi.x1swvt13.xl56j7k');
-        if (container && container.querySelectorAll('button').length === 0) {
-            let copy_oh = 'Copy formatted opening hours';
-            try { copy_oh = 'Copy formatted opening hours\n' + copyFBHours(false); } catch { console.log("cant find hours"); }
-            const data = { text: 'Opening Hours', handler: copyFBHours, tooltip: copy_oh };
-            let button = document.createElement('button');
-            button.innerHTML = `<class="button-icon"> ${data.text}`;
-            button.className = 'custom-button';
-            button.title = data.tooltip || data.text;
-            button.onclick = async () => {
-                try {
-                    await data.handler();
-                    successStyle(button);
-                } catch (error) {
-                    console.error(error);
-                    errorStyle(button);
-                }
-            };
-            container.appendChild(button);
+    function addFacebookButton() {
+        let container = document.querySelector('h3.x1heor9g.x1w99v1x.x1hl2dh5.x1h0z5lf.x1yik3gh.x1n2onr6.x1s3etdg.x1t2pt7d.x1ja2u2z');
+        if (container && container.innerText.includes('Hours')) {
+            if (container.parentElement.querySelectorAll('button').length === 0) {
+                let copy_oh = 'Copy formatted opening hours';
+                try { copy_oh = 'Copy formatted opening hours\n' + copyFBHours(false); } catch { console.log("cant find hours"); }
+                const data = { text: 'Opening Hours', handler: copyFBHours, icon: 'https://toppng.com/uploads/preview/ink-pink-clock-clip-art-flexible-working-hours-ico-11563426366wt3lfgsvlc.png', tooltip: copy_oh };
+                let button = createButton(data);
+                container.parentElement.appendChild(button);
+            }
         }
     }
 
     function createButton(data) {
         let button = document.createElement('button');
+        button.type = 'button';
         button.innerHTML = data.icon ? `<img src="${data.icon}" class="button-icon"> ${data.text}` : data.text;
         button.className = 'custom-button';
         button.title = data.tooltip || data.text;
         button.onclick = async () => {
             try {
-                successStyle(button);
                 await data.handler();
+                successStyle(button);
             } catch (error) {
                 console.error(error);
                 errorStyle(button);
@@ -977,133 +1023,131 @@ function convertTo24Hour(time12h, first = false) {
         return button;
     }
 
-    async function showAdditionalButtons() {
-        let container = document.querySelector('.lMbq3e h1.DUwDvf.lfPIob');
-        let buttonContainer = container.querySelector('.button-container');
-        let complexButton = Array.from(buttonContainer.querySelectorAll('button')).find(button => button.innerHTML.includes('Complex'));
-        if (complexButton) {
-            successStyle(complexButton);
-            await delay(300);
-            complexButton.remove();
-        }
-        let buildingAtTooltip = 'Open a menu to copy different building types';
-        let jsonAddressTooltip = 'Copy address as JSON\n' + copyJsonAddress(false);
-        const buttonsData = [
-            { text: 'OSM', handler: openStreetMap, icon: 'https://openstreetmap.placer.team/assets/osm_logo-0e19527a1cc9fdf566c217d6e1863d88cac7bb743914792dea5d8db813501ad6.png', tooltip: 'Open OpenStreetMap at the same coordinates' },
-            { text: 'Analytic', handler: openPlacerMapUrl, icon: 'https://analytics.placer.ai/favicon/favicon-32x32.png?v=2', tooltip: 'Open - analytics.placer.ai at the same coordinates' },
-            { text: 'GeoJson', handler: openGeoJson, icon: 'https://geojson.io/img/favicon.png', tooltip: 'Open geojson.io at the same coordinates' },
-            { text: 'Building At', handler: showBuildingAtPopup, icon: 'https://cdn-icons-png.flaticon.com/128/25/25694.png', tooltip: buildingAtTooltip },
-            { text: 'JsonAddress', handler: copyJsonAddress, icon: 'https://analytics.placer.team/admin/static/admin-favicon.png', tooltip: jsonAddressTooltip }
-        ];
-        let editorButtonRow = Array.from(buttonContainer.querySelectorAll('.button-row')).find(row => row.querySelector('button') && row.querySelector('button').innerHTML.includes('Venue Editor'));
-        if (editorButtonRow) {
-            buttonsData.slice(0, 1).forEach(data => {
-                let button = createButton(data);
-                editorButtonRow.appendChild(button);
-            });
-            let firstNewButtonsRow = document.createElement('div');
-            firstNewButtonsRow.className = 'button-row';
-            buttonsData.slice(1, 3).forEach(data => {
-                let button = createButton(data);
-                firstNewButtonsRow.appendChild(button);
-            });
-            buttonContainer.appendChild(firstNewButtonsRow);
-            let secondNewButtonsRow = document.createElement('div');
-            secondNewButtonsRow.className = 'button-row';
-            buttonsData.slice(3).forEach(data => {
-                let button = createButton(data);
-                secondNewButtonsRow.appendChild(button);
-            });
-            buttonContainer.appendChild(secondNewButtonsRow);
-        }
-    }
-
-    async function checkAndAddButtons() {
-        while (true) {
-            if (window.location.href.includes('google')) await addButtonToContainer();
-            if (window.location.href.includes('https://www.yelp')) {
-                try {
-                    await addYelpButton();
-                    await addYelpUpdateButton();
-                } catch (error) {}
+    function addGlobalStyles() {
+        let style = document.createElement('style');
+        style.type = 'text/css';
+        style.innerHTML = `
+            .button-container {
+                margin-top: 10px;
+                padding-top: 10px;
+                border-top: 1px solid #ccc;
+                display: block;
+                width: 100%;
             }
-            if (window.location.href.includes('https://www.facebook')) await addFBB();
-            await delay(2000);
+            .section-header {
+                font-size: 14px;
+                font-weight: bold;
+                color: #555;
+                margin-bottom: 5px;
+                text-align: center;
+            }
+            .button-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 5px;
+                justify-content: center;
+            }
+            .custom-button {
+                background-color: #f0f0f0;
+                color: #333;
+                border: 1px solid #ccc;
+                padding: 5px 10px;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                font-size: 13px;
+                display: flex;
+                align-items: center;
+                text-align: center;
+                margin: 0px 0;
+            }
+            .button-icon {
+                width: 20px;
+                height: 20px;
+                margin-right: 5px;
+                filter: grayscale(100%);
+            }
+            .custom-button:hover {
+                background-color: #e0e0e0;
+                transform: scale(1.03);
+            }
+            .custom-button:active, .custom-button.active {
+                transform: scale(1.1);
+                background-color: #d0d0d0;
+            }
+            #snackbar {
+                visibility: hidden;
+                color: #fff;
+                background-color: #333;
+                min-width: 250px;
+                margin-left: -125px;
+                border-radius: 2px;
+                padding: 16px;
+                text-align: center;
+                left: 50%;
+                bottom: 30px;
+                z-index: 1;
+                position: fixed;
+            }
+            #snackbar.show {
+                visibility: visible;
+                -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+                animation: fadein 0.5s, fadeout 0.5s 2.5s;
+            }
+            @-webkit-keyframes fadein {
+                from {bottom: 0; opacity: 0;}
+                to {bottom: 30px; opacity: 1;}
+            }
+            @keyframes fadein {
+                from {bottom: 0; opacity: 0;}
+                to {bottom: 30px; opacity: 1;}
+            }
+            @-webkit-keyframes fadeout {
+                from {bottom: 30px; opacity: 1;}
+                to {bottom: 0; opacity: 0;}
+            }
+            @keyframes fadeout {
+                from {bottom: 30px; opacity: 1;}
+                to {bottom: 0; opacity: 0;}
+            }
+            .y-css-1iiiexg {
+                display: flex;
+                align-items: center;
+            }
+            .y-css-1iiiexg button.custom-button {
+                margin-left: 10px;
+            }
+            .x1heor9g.x1w99v1x.x1hl2dh5.x1h0z5lf.x1yik3gh.x1n2onr6.x1s3etdg.x1t2pt7d.x1ja2u2z {
+                display: flex;
+                align-items: center;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function observeDOM() {
+        if (window.location.host.includes('google.com')) {
+            const targetNode = document.body;
+            const config = { childList: true, subtree: true };
+            const callback = function(mutationsList, observer) {
+                addButtonToContainer();
+            };
+            const observer = new MutationObserver(callback);
+            observer.observe(targetNode, config);
+        } else if (window.location.host.includes('yelp.com')) {
+            addYelpButton();
+            addYelpUpdateButtons();
+        } else if (window.location.host.includes('facebook.com')) {
+            addFacebookButton();
         }
     }
 
-    const style = document.createElement('style');
-    style.innerHTML = `
-        .custom-button {
-            margin: 2px;
-            padding: 10px 20px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            cursor: pointer;
-            background-color: #f8f8f8;
-            font-size: 14px;
-            transition: background-color 0.3s ease;
-            display: flex;
-            align-items: center;
-        }
-        .custom-button:hover { background-color: #e0e0e0; }
-        .button-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 2px;
-            margin-top: 0px;
-        }
-        .button-row { display: flex; gap: 3px; }
-        .section-header {
-            font-weight: normal;
-            font-size: 12px;
-            text-align: center;
-            margin: 0px 0;
-        }
-        .button-icon { width: 20px; height: 20px; margin-right: 10px; }
-        .custom-button:active, .custom-button.active {
-            transform: scale(1.1);
-            background-color: #d0d0d0;
-        }
-        #snackbar {
-            visibility: hidden;
-            color: #fff;
-            background-color: #333;
-            min-width: 250px;
-            margin-left: -125px;
-            border-radius: 2px;
-            padding: 16px;
-            text-align: center;
-            left: 50%;
-            bottom: 30px;
-            z-index: 1;
-            position: fixed;
-        }
-        #snackbar.show {
-            visibility: visible;
-            -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
-            animation: fadein 0.5s, fadeout 0.5s 2.5s;
-        }
-        @-webkit-keyframes fadein {
-            from {bottom: 0; opacity: 0;}
-            to {bottom: 30px; opacity: 1;}
-        }
-        @keyframes fadein {
-            from {bottom: 0; opacity: 0;}
-            to {bottom: 30px; opacity: 1;}
-        }
-        @-webkit-keyframes fadeout {
-            from {bottom: 30px; opacity: 1;}
-            to {bottom: 0; opacity: 0;}
-        }
-        @keyframes fadeout {
-            from {bottom: 30px; opacity: 1;}
-            to {bottom: 0; opacity: 0;}
-        }
-        .popup-button:hover { background-color: #e0e0e0; }
-    `;
-    document.head.appendChild(style);
+    addGlobalStyles();
     addSnackBarToPage();
-    checkAndAddButtons();
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', observeDOM);
+    } else {
+        observeDOM();
+    }
 })();
